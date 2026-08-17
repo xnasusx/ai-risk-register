@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Quantified AI Risk Register — NIST AI RMF and ISO 42001, in Dollars</title>
+  <meta name="description" content="An AI risk register that produces loss exposure ranges instead of heat-map colours. Twelve seeded AI risk scenarios, Monte Carlo aggregation, and live coverage mapping against NIST AI RMF 1.0 and ISO/IEC 42001 Annex A. Built by RootCaws LLC." />
+  <meta name="author" content="RootCaws LLC" />
+  <meta name="robots" content="noindex, follow" />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Quantified AI Risk Register" />
+  <meta property="og:description" content="AI governance frameworks give you coverage. They do not give you a number. This register gives you both." />
+  <meta property="og:site_name" content="RootCaws LLC" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600;1,9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <style>
+    :root{
+      color-scheme:light;
+      --paper:#f7ebed; --panel:#ffffff; --ink:#3a3336; --line:#d8c9cc; --accent:#8d5860;
+    }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{
+      background:var(--paper);color:var(--ink);
+      font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+      -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;min-width:320px;
+    }
+    ::selection{background:#f4dcdf;color:var(--ink)}
+    a{color:var(--accent)}
+    a:hover{opacity:0.82}
+    a:focus-visible,button:focus-visible,input:focus-visible{
+      outline:2px solid var(--accent);outline-offset:3px;border-radius:4px;
+    }
+    input[type=text]{
+      font-family:'Inter',sans-serif;font-size:13px;color:var(--ink);
+      background:var(--panel);border:1px solid var(--line);border-radius:7px;
+      padding:6px 9px;width:100%;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script>
+  'use strict';
+  const {useState,useMemo,useCallback,useEffect,createElement:h}=React;
+
+  const C={
+    bg:"#f7ebed",bgCard:"#ffffff",bgBand:"#f0dee0",
+    border:"#d8c9cc",borderSoft:"rgba(58,51,54,0.08)",
+    text:"#3a3336",textMuted:"#4d4548",textDim:"#7a7073",
+    accent:"#8d5860",accent2:"#c7848d",accentSoft:"#f4dcdf",
+    amber:"#9a6a24",amberSoft:"#f7e9d4",
+    sage:"#4c7359",sageSoft:"#e2eee6"
+  };
+  const ui="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+  const display="'Fraunces', Georgia, serif";
+  const ITER=10000;
+
+  function useIsMobile(bp){const[m,setM]=useState(false);useEffect(()=>{const c=()=>setM(window.innerWidth<(bp||860));c();window.addEventListener("resize",c);return()=>window.removeEventListener("resize",c);},[bp]);return m;}
+
+  /* --------------------------------------------------------------------------
+     NIST AI RMF 1.0 — four functions, nineteen categories. Coverage is tracked
+     at category level because that is the level a register can honestly claim.
+  -------------------------------------------------------------------------- */
+  const RMF={
+    GOVERN:[
+      ["GOVERN 1","Policies, processes, and practices for managing AI risk are in place and implemented"],
+      ["GOVERN 2","Accountability structures are in place; teams are empowered, responsible, and trained"],
+      ["GOVERN 3","Workforce diversity, equity, inclusion, and accessibility processes are prioritised"],
+      ["GOVERN 4","A culture that considers and communicates AI risk is established"],
+      ["GOVERN 5","Processes are in place for engagement with relevant AI actors"],
+      ["GOVERN 6","Third-party software, data, and supply chain risks are addressed"]],
+    MAP:[
+      ["MAP 1","Context is established and understood"],
+      ["MAP 2","Categorisation of the AI system is performed"],
+      ["MAP 3","Capabilities, targeted usage, goals, and expected benefits and costs are understood"],
+      ["MAP 4","Risks and benefits are mapped for all components, including third-party software and data"],
+      ["MAP 5","Impacts to individuals, groups, communities, organisations, and society are characterised"]],
+    MEASURE:[
+      ["MEASURE 1","Appropriate methods and metrics are identified and applied"],
+      ["MEASURE 2","AI systems are evaluated for trustworthy characteristics"],
+      ["MEASURE 3","Mechanisms for tracking identified AI risks over time are in place"],
+      ["MEASURE 4","Feedback about the efficacy of measurement is gathered and assessed"]],
+    MANAGE:[
+      ["MANAGE 1","AI risks from MAP and MEASURE are prioritised, responded to, and managed"],
+      ["MANAGE 2","Strategies to maximise benefits and minimise negative impacts are planned and implemented"],
+      ["MANAGE 3","AI risks and benefits from third-party entities are managed"],
+      ["MANAGE 4","Risk treatments and communication plans are documented and monitored regularly"]]
+  };
+  const RMF_ALL=Object.keys(RMF).flatMap(f=>RMF[f].map(c=>c[0]));
+
+  /* ISO/IEC 42001:2023 Annex A control groups. Group level only — see README. */
+  const ISO=[
+    ["A.2","Policies related to AI"],
+    ["A.3","Internal organisation"],
+    ["A.4","Resources for AI systems"],
+    ["A.5","Assessing impacts of AI systems"],
+    ["A.6","AI system life cycle"],
+    ["A.7","Data for AI systems"],
+    ["A.8","Information for interested parties"],
+    ["A.9","Use of AI systems"],
+    ["A.10","Third-party and customer relationships"]
+  ];
+
+  /* --------------------------------------------------------------------------
+     Twelve AI risk scenarios. Frequency is events per year; magnitude is dollars
+     per event. Both are three-point estimates, which is the least a range can be
+     and still be a range.
+  -------------------------------------------------------------------------- */
+  const LIBRARY=[
+    {id:"inject",title:"Prompt injection drives an unauthorised action",char:"Secure & resilient",
+     desc:"Untrusted content reaches the model's context and steers a tool call, a retrieval, or a downstream write.",
+     f:[0.5,2,8],m:[25000,180000,2000000],rmf:["MAP 4","MEASURE 2","MANAGE 1"],iso:["A.6","A.9"]},
+    {id:"poison",title:"Training or fine-tuning data poisoning",char:"Valid & reliable",
+     desc:"Adversarial or simply bad records enter the training set and shift behaviour in a way nobody attributes to the data.",
+     f:[0.05,0.3,1.5],m:[100000,750000,6000000],rmf:["MAP 4","MEASURE 2","MANAGE 3"],iso:["A.7"]},
+    {id:"leak",title:"Sensitive data leaves for a third-party model provider",char:"Privacy-enhanced",
+     desc:"Regulated or confidential data is sent to an external inference endpoint outside the agreed data boundary.",
+     f:[0.3,1.5,6],m:[50000,400000,5000000],rmf:["GOVERN 6","MAP 4","MANAGE 3"],iso:["A.7","A.10"]},
+    {id:"inversion",title:"Model inversion or membership inference",char:"Privacy-enhanced",
+     desc:"An attacker recovers training records, or confirms an individual was in the training set, from model outputs.",
+     f:[0.02,0.15,0.8],m:[150000,900000,7000000],rmf:["MEASURE 2","MANAGE 1"],iso:["A.5","A.7"]},
+    {id:"confab",title:"Confabulation inside a customer-facing decision path",char:"Valid & reliable",
+     desc:"The model asserts something false with full fluency and the output is acted on without a verification step.",
+     f:[2,12,60],m:[5000,60000,900000],rmf:["MEASURE 1","MEASURE 2","MANAGE 2"],iso:["A.6","A.8"]},
+    {id:"bias",title:"Harmful bias in an eligibility or ranking decision",char:"Fair — harmful bias managed",
+     desc:"Outcomes differ systematically across a protected group in a decision with real consequences for the person.",
+     f:[0.1,0.6,2.5],m:[200000,1500000,12000000],rmf:["GOVERN 3","MAP 5","MEASURE 2"],iso:["A.5"]},
+    {id:"drift",title:"Silent model drift degrades accuracy",char:"Valid & reliable",
+     desc:"The world moves, the model does not, and nothing in the pipeline notices until a downstream metric moves.",
+     f:[0.5,2,6],m:[20000,150000,1200000],rmf:["MEASURE 3","MEASURE 4","MANAGE 4"],iso:["A.6"]},
+    {id:"agentic",title:"Agentic action executed without human approval",char:"Safe",
+     desc:"An autonomous workflow takes a consequential action — a payment, a deletion, an external message — with no gate.",
+     f:[0.2,1,5],m:[50000,500000,8000000],rmf:["GOVERN 1","MANAGE 1","MANAGE 4"],iso:["A.6","A.9"]},
+    {id:"vendor",title:"Third-party model deprecation or breaking change",char:"Secure & resilient",
+     desc:"A provider retires a model, changes behaviour, or alters terms, and a dependent workflow degrades.",
+     f:[1,3,8],m:[15000,120000,900000],rmf:["GOVERN 6","MAP 4","MANAGE 3"],iso:["A.10"]},
+    {id:"shadow",title:"Shadow AI adopted outside governance",char:"Accountable & transparent",
+     desc:"A team ships an AI feature or pipes data into a tool that the inventory, the DPIA, and the register never saw.",
+     f:[2,6,20],m:[10000,90000,1500000],rmf:["GOVERN 1","GOVERN 2","MAP 1"],iso:["A.2","A.3","A.9"]},
+    {id:"ip",title:"IP or copyright exposure from generated output",char:"Accountable & transparent",
+     desc:"Generated material reproduces protected content, or licence terms on training data are breached downstream.",
+     f:[0.1,0.5,2],m:[75000,600000,5000000],rmf:["GOVERN 1","MAP 3","MANAGE 2"],iso:["A.7","A.8"]},
+    {id:"explain",title:"Unable to explain an adverse automated decision",char:"Explainable & interpretable",
+     desc:"A regulator, a customer, or a court asks why, and the honest answer is that nobody kept enough to reconstruct it.",
+     f:[0.3,1.5,5],m:[40000,350000,3000000],rmf:["MAP 5","MEASURE 2","MANAGE 4"],iso:["A.5","A.8"]}
+  ];
+
+  /* -------------------------- simulation -------------------------- */
+  function triangular(min,mode,max){
+    if(!(max>min))return min;
+    const u=Math.random(),c=(mode-min)/(max-min);
+    return u<c ? min+Math.sqrt(u*(max-min)*(mode-min))
+               : max-Math.sqrt((1-u)*(max-min)*(max-mode));
+  }
+  function poisson(lambda){
+    if(lambda<=0)return 0;
+    if(lambda>30)return Math.max(0,Math.round(lambda+Math.sqrt(lambda)*
+      (Math.sqrt(-2*Math.log(Math.random()))*Math.cos(2*Math.PI*Math.random()))));
+    const L=Math.exp(-lambda);let k=0,p=1;
+    do{k++;p*=Math.random();}while(p>L);
+    return k-1;
+  }
+  function pct(sorted,p){
+    if(!sorted.length)return 0;
+    const i=Math.min(sorted.length-1,Math.max(0,Math.floor(p*(sorted.length-1))));
+    return sorted[i];
+  }
+
+  function parseMoney(raw){
+    if(raw==null)return 0;
+    const s=String(raw).trim().replace(/[$,\s]/g,"");
+    if(!s)return 0;
+    const m=s.match(/^(-?\d*\.?\d+)([kKmMbB])?$/);
+    if(!m)return 0;
+    return parseFloat(m[1])*({k:1e3,m:1e6,b:1e9}[(m[2]||"").toLowerCase()]||1);
+  }
+  function fmtMoney(v){
+    if(!isFinite(v))return "$0";
+    const a=Math.abs(v),s=v<0?"-":"";
+    if(a>=1e9)return s+"$"+(a/1e9).toFixed(a/1e9>=10?0:1)+"B";
+    if(a>=1e6)return s+"$"+(a/1e6).toFixed(a/1e6>=10?0:1)+"M";
+    if(a>=1e3)return s+"$"+(a/1e3).toFixed(0)+"K";
+    return s+"$"+Math.round(a).toLocaleString();
+  }
+  function fmtNum(v){
+    return v>=10?v.toFixed(0):v>=1?v.toFixed(1):v.toFixed(2);
+  }
+
+  const cardStyle=(pad)=>({
+    background:C.bgCard,border:"1px solid "+C.border,borderRadius:16,
+    boxShadow:"0 10px 26px rgba(58,51,54,0.06)",padding:pad||"20px 24px"
+  });
+  const eyebrow={fontFamily:ui,fontSize:11,fontWeight:600,letterSpacing:"0.14em",textTransform:"uppercase"};
+  const tiny={fontFamily:ui,fontSize:10,fontWeight:600,letterSpacing:"0.08em",textTransform:"uppercase",color:C.textDim};
+
+  // The portfolio risk lab renders this page in an iframe and carries the lesson
+  // copy in its own header, so the lesson act is skipped when we are embedded.
+  const EMBEDDED=(function(){try{return window.self!==window.top;}catch(e){return true;}})();
+
+  const BENCHMARKS_URL="./risk-benchmarks.json";
+
+  // Every figure in LIBRARY is a seeded estimate. This panel says so, and
+  // reports what sourced AI loss data actually exists at the time you load the
+  // page -- so if the corpus gains a first-party AI shard, the claim below
+  // stops being true visibly rather than silently.
+  function ProvenancePanel({data,error,isMobile:mb}){
+    // Reuse the page's own card helper. This tool's palette has no `shadow`
+    // key, so a hand-rolled boxShadow:C.shadow silently rendered as none and
+    // left this the one flat panel on the page.
+    const card=Object.assign({},cardStyle(mb?18:26),{marginBottom:18});
+    const tiny={fontFamily:ui,fontSize:10.5,fontWeight:700,letterSpacing:"0.1em",
+      textTransform:"uppercase",color:C.textDim};
+    const body={fontFamily:ui,fontSize:13.5,lineHeight:1.7,color:C.textMuted,marginBottom:12};
+
+    let found=null;
+    if(data){
+      const bm=data.benchmarks||[];
+      const ai=bm.filter(b=>/\bai\b|ai[_-]|deepfake/i.test((b.threat||"")+" "+(b.id||"")+" "+(b.title||"")));
+      const conf=ai.reduce((a,b)=>{const s=b.confidence_summary||{};
+        Object.keys(s).forEach(k=>a[k]=(a[k]||0)+s[k]);return a;},{});
+      found={total:bm.length,ai:ai.length,
+        names:ai.map(b=>b.title),
+        conf:["low","medium","high","unstated"].filter(k=>conf[k]).map(k=>conf[k]+" "+k).join(", ")};
+    }
+
+    return h('div',{style:card},
+      h('div',{style:Object.assign({},tiny,{fontSize:12,color:C.accent,marginBottom:6})},
+        "Where these numbers come from"),
+      h('div',{style:body},
+        h('strong',{style:{color:C.text}},"They are seeded estimates, not sourced ones. "),
+        "Every frequency and magnitude in this register was set by judgment to make the mechanics legible. None of them traces to a published loss study, and nothing here should be carried into a decision as though it did."),
+      h('div',{style:body},
+        "That is not an oversight in this tool. It is the state of the evidence. Sourced loss distributions exist for the classic cyber events \u2014 breach, ransomware, business email compromise \u2014 because insurers, regulators and national statistics offices publish claim and prevalence data for them. For first-party AI system risk there is no equivalent: the public AI incident catalogues record what happened without recording what it cost, so a range built from them would carry a citation without carrying a measurement."),
+      found&&h('div',{style:{background:C.amberSoft,borderLeft:"3px solid "+C.amber,borderRadius:8,
+        padding:mb?"12px 14px":"14px 18px",marginBottom:12}},
+        h('div',{style:{fontFamily:ui,fontSize:13,lineHeight:1.7,color:C.textMuted}},
+          h('strong',{style:{color:C.amber}},"Checked against the corpus just now: "),
+          found.total," governed shards, of which ",
+          h('strong',{style:{color:C.text}},found.ai),
+          found.ai===1?" is AI-related":" are AI-related",
+          found.ai?[" (",found.names.join(", "),"; ",found.conf," confidence)"]:null,
+          ". ",
+          found.ai
+            ? "That shard covers an attacker using AI against you through social engineering. Every risk in this register is the opposite case \u2014 your own system failing \u2014 so it anchors none of them, and the register deliberately does not offer it as a starting range."
+            : "Nothing in the corpus bears on the risks modelled here.")),
+      h('div',{style:body},
+        h('strong',{style:{color:C.text}},"What would change this. "),
+        "A scenario here becomes source-backed when a public dataset reports per-incident loss for that failure mode, on a stated population, with enough events to support a range rather than an anecdote. Incident counts are not enough; a single headline settlement is not enough. Until then the honest form is a seeded range with the reasoning visible, which is what this is."),
+      h('div',{style:{fontFamily:ui,fontSize:12.5,color:C.textDim,lineHeight:1.6}},
+        error
+          ? ["Corpus unavailable (",error,"); the statement above is unchanged, only unverified this load."]
+          : ["The sourced corpus is at ",
+             h('a',{key:"a",href:"https://github.com/RootCawsLLC/risk-benchmarks",target:"_blank",rel:"noopener"},
+               "RootCawsLLC/risk-benchmarks"),
+             ", where the shards that do have provenance carry it per parameter."]));
+  }
+
+  function App(){
+    const mb=useIsMobile();
+    const [entries,setEntries]=useState(()=>
+      ["inject","leak","confab","shadow"].map(id=>{
+        const L=LIBRARY.find(x=>x.id===id);
+        return {id:L.id,fMin:String(L.f[0]),fMode:String(L.f[1]),fMax:String(L.f[2]),
+                mMin:fmtMoney(L.m[0]),mMode:fmtMoney(L.m[1]),mMax:fmtMoney(L.m[2])};
+      }));
+    const [seed,setSeed]=useState(0);
+
+    // Read-only: the corpus is fetched to check the claim in the provenance
+    // panel, never to seed a scenario. Nothing here loads a shard's numbers.
+    const [bmData,setBmData]=useState(null);
+    const [bmError,setBmError]=useState(null);
+    useEffect(()=>{
+      let live=true;
+      fetch(BENCHMARKS_URL)
+        .then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.json();})
+        .then(d=>{if(live)setBmData(d);})
+        .catch(e=>{if(live)setBmError(e.message);});
+      return()=>{live=false;};
+    },[]);
+
+    const inRegister=useMemo(()=>new Set(entries.map(e=>e.id)),[entries]);
+
+    const add=useCallback(id=>{
+      const L=LIBRARY.find(x=>x.id===id);
+      setEntries(p=>p.some(e=>e.id===id)?p:p.concat([{
+        id:L.id,fMin:String(L.f[0]),fMode:String(L.f[1]),fMax:String(L.f[2]),
+        mMin:fmtMoney(L.m[0]),mMode:fmtMoney(L.m[1]),mMax:fmtMoney(L.m[2])}]));
+    },[]);
+    const remove=useCallback(id=>setEntries(p=>p.filter(e=>e.id!==id)),[]);
+    const edit=useCallback((id,k,v)=>setEntries(p=>p.map(e=>e.id===id?Object.assign({},e,{[k]:v}):e)),[]);
+
+    const sim=useMemo(()=>{
+      void seed;
+      const per={},portfolio=new Array(ITER).fill(0);
+      entries.forEach(e=>{
+        const fMin=parseFloat(e.fMin)||0,fMode=parseFloat(e.fMode)||0,fMax=parseFloat(e.fMax)||0;
+        const mMin=parseMoney(e.mMin),mMode=parseMoney(e.mMode),mMax=parseMoney(e.mMax);
+        const out=new Array(ITER);
+        for(let i=0;i<ITER;i++){
+          const lambda=triangular(fMin,Math.min(Math.max(fMode,fMin),fMax),fMax);
+          const n=poisson(lambda);
+          let loss=0;
+          for(let k=0;k<n;k++)loss+=triangular(mMin,Math.min(Math.max(mMode,mMin),mMax),mMax);
+          out[i]=loss;
+          portfolio[i]+=loss;
+        }
+        const sorted=out.slice().sort((a,b)=>a-b);
+        per[e.id]={mean:out.reduce((a,b)=>a+b,0)/ITER,p50:pct(sorted,0.5),p90:pct(sorted,0.9)};
+      });
+      const ps=portfolio.slice().sort((a,b)=>a-b);
+      return{per,portfolio:{
+        mean:portfolio.reduce((a,b)=>a+b,0)/ITER,
+        p50:pct(ps,0.5),p90:pct(ps,0.9),p99:pct(ps,0.99),
+        zero:portfolio.filter(v=>v===0).length/ITER}};
+    },[entries,seed]);
+
+    const coverage=useMemo(()=>{
+      const rmf=new Set(),iso=new Set();
+      entries.forEach(e=>{
+        const L=LIBRARY.find(x=>x.id===e.id);
+        if(!L)return;
+        L.rmf.forEach(c=>rmf.add(c));
+        L.iso.forEach(c=>iso.add(c));
+      });
+      return{rmf,iso,rmfPct:(rmf.size/RMF_ALL.length)*100,isoPct:(iso.size/ISO.length)*100};
+    },[entries]);
+
+    const exportMd=useMemo(()=>{
+      const L=[];
+      L.push("# Quantified AI Risk Register");
+      L.push("");
+      L.push("Aggregate annual loss exposure across "+entries.length+" AI risk"+(entries.length===1?"":"s")+
+             ", from "+ITER.toLocaleString()+" Monte Carlo iterations:");
+      L.push("");
+      L.push("| Statistic | Annual loss |");
+      L.push("| --- | --- |");
+      L.push("| Expected (mean) | "+fmtMoney(sim.portfolio.mean)+" |");
+      L.push("| Median (P50) | "+fmtMoney(sim.portfolio.p50)+" |");
+      L.push("| Bad year (P90) | "+fmtMoney(sim.portfolio.p90)+" |");
+      L.push("| Severe year (P99) | "+fmtMoney(sim.portfolio.p99)+" |");
+      L.push("| Years with no loss event | "+(sim.portfolio.zero*100).toFixed(1)+"% |");
+      L.push("");
+      L.push("## Register");
+      L.push("");
+      L.push("| Risk | Characteristic | Freq/yr (min-likely-max) | Loss/event (min-likely-max) | Expected | P90 | NIST AI RMF | ISO 42001 |");
+      L.push("| --- | --- | --- | --- | --- | --- | --- | --- |");
+      entries.forEach(e=>{
+        const Lb=LIBRARY.find(x=>x.id===e.id),s=sim.per[e.id]||{};
+        L.push("| "+Lb.title+" | "+Lb.char+" | "+e.fMin+"–"+e.fMode+"–"+e.fMax+" | "+
+               e.mMin+"–"+e.mMode+"–"+e.mMax+" | "+fmtMoney(s.mean||0)+" | "+fmtMoney(s.p90||0)+
+               " | "+Lb.rmf.join(", ")+" | "+Lb.iso.join(", ")+" |");
+      });
+      L.push("");
+      L.push("## Framework coverage");
+      L.push("");
+      L.push("NIST AI RMF 1.0: "+coverage.rmf.size+" of "+RMF_ALL.length+" categories touched by this register.");
+      L.push("");
+      const missing=RMF_ALL.filter(c=>!coverage.rmf.has(c));
+      L.push("Not addressed: "+(missing.length?missing.join(", "):"none"));
+      L.push("");
+      L.push("ISO/IEC 42001 Annex A: "+coverage.iso.size+" of "+ISO.length+" control groups touched.");
+      L.push("");
+      L.push("Coverage means a risk in this register maps to that category. It does not mean the");
+      L.push("category is satisfied — that is a control question, not a register question.");
+      return L.join("\n");
+    },[entries,sim,coverage]);
+
+    const [copied,setCopied]=useState(false);
+    const copy=useCallback(()=>{
+      const done=()=>{setCopied(true);setTimeout(()=>setCopied(false),2200);};
+      if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(exportMd).then(done).catch(()=>{});
+      else{const ta=document.createElement("textarea");ta.value=exportMd;document.body.appendChild(ta);ta.select();
+        try{document.execCommand("copy");done();}catch(err){}document.body.removeChild(ta);}
+    },[exportMd]);
+
+    const pd=mb?16:24;
+    const prose={fontFamily:ui,fontSize:mb?15:16,lineHeight:1.75,color:C.textMuted};
+    const numIn=(e,k,ph)=>h('input',{type:"text",value:e[k],placeholder:ph,
+      onChange:ev=>edit(e.id,k,ev.target.value),"aria-label":k});
+
+    return h('div',{style:{maxWidth:1060,margin:"0 auto",
+      padding:EMBEDDED?(mb?"4px 16px 64px":"8px 24px 96px"):(mb?"28px 16px 64px":"48px 24px 96px")}},
+
+      !EMBEDDED&&h('div',{style:{marginBottom:mb?32:44}},
+        h('div',{style:Object.assign({},eyebrow,{color:C.amber,marginBottom:12})},"The lesson"),
+        h('h1',{style:{fontFamily:display,fontSize:mb?32:44,fontWeight:700,lineHeight:1.12,marginBottom:18,color:C.text}},
+          "AI frameworks give you coverage. They do not give you a ",h('em',{style:{fontStyle:"italic",color:C.accent}},"number")),
+        h('p',{style:Object.assign({},prose,{marginBottom:14})},
+          "NIST AI RMF 1.0 and ISO/IEC 42001 are good at what they are for. They tell you which questions an AI programme should be able to answer, and they give you a vocabulary an auditor recognises. What neither does — because neither is trying to — is tell you how much AI risk you are actually carrying."),
+        h('p',{style:Object.assign({},prose,{marginBottom:14})},
+          "So most AI risk registers end up as a list of scenarios with a colour beside each one. Red is not a unit of measurement. You cannot add two reds, you cannot compare a red to a control budget, and you certainly cannot walk a CFO through one."),
+        h('p',{style:prose},
+          "This register keeps the framework mapping — you still need to show coverage — but scores every risk the way any other risk should be scored: a frequency range, a loss magnitude range, and a Monte Carlo that turns the two into an annual loss distribution you can aggregate and defend.")),
+
+      h('div',{style:Object.assign({},eyebrow,{color:C.accent,marginBottom:16})},"The tool"),
+
+      h('div',{style:Object.assign({},cardStyle(pd),{marginBottom:18})},
+        h('div',{style:Object.assign({},eyebrow,{fontSize:12,color:C.accent,marginBottom:6})},"Scenario library"),
+        h('div',{style:{fontFamily:ui,fontSize:13.5,lineHeight:1.6,color:C.textDim,marginBottom:14}},
+          "Twelve AI-specific scenarios, each pre-mapped to the AI RMF categories and ISO 42001 Annex A groups it bears on. Click to add or remove."),
+        h('div',{style:{display:"flex",flexWrap:"wrap",gap:8}},
+          LIBRARY.map(L=>{
+            const on=inRegister.has(L.id);
+            return h('button',{key:L.id,onClick:()=>on?remove(L.id):add(L.id),
+              "aria-pressed":on,title:L.desc,
+              style:{fontFamily:ui,fontSize:12.5,fontWeight:on?600:500,cursor:"pointer",
+                padding:"7px 13px",borderRadius:999,textAlign:"left",
+                border:"1px solid "+(on?C.accent:C.border),
+                background:on?C.accentSoft:"transparent",
+                color:on?C.accent:C.textDim}},(on?"− ":"+ ")+L.title);
+          }))),
+
+      entries.length===0
+        ? h('div',{style:Object.assign({},cardStyle(pd),{marginBottom:18,textAlign:"center",
+            fontFamily:ui,fontSize:14,color:C.textDim})},"Add a scenario above to start the register.")
+        : entries.map(e=>{
+            const L=LIBRARY.find(x=>x.id===e.id),s=sim.per[e.id]||{mean:0,p50:0,p90:0};
+            return h('div',{key:e.id,style:Object.assign({},cardStyle(pd),{marginBottom:14})},
+              h('div',{style:{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",marginBottom:12}},
+                h('div',null,
+                  h('div',{style:{fontFamily:ui,fontSize:15,fontWeight:600,color:C.text,marginBottom:4}},L.title),
+                  h('div',{style:{fontFamily:ui,fontSize:13,lineHeight:1.55,color:C.textDim,marginBottom:8}},L.desc),
+                  h('div',{style:{display:"flex",flexWrap:"wrap",gap:6}},
+                    h('span',{style:{fontFamily:ui,fontSize:11,fontWeight:600,padding:"3px 9px",borderRadius:999,
+                      background:C.sageSoft,color:C.sage}},L.char),
+                    L.rmf.map(c=>h('span',{key:c,style:{fontFamily:ui,fontSize:11,fontWeight:600,padding:"3px 9px",
+                      borderRadius:999,background:C.accentSoft,color:C.accent}},c)),
+                    L.iso.map(c=>h('span',{key:c,style:{fontFamily:ui,fontSize:11,fontWeight:600,padding:"3px 9px",
+                      borderRadius:999,background:C.amberSoft,color:C.amber}},"ISO "+c)))),
+                h('button',{onClick:()=>remove(e.id),"aria-label":"Remove "+L.title,
+                  style:{fontFamily:ui,fontSize:12,fontWeight:600,cursor:"pointer",flexShrink:0,
+                    padding:"5px 11px",borderRadius:999,border:"1px solid "+C.border,
+                    background:"transparent",color:C.textDim}},"Remove")),
+
+              h('div',{style:{display:"grid",gridTemplateColumns:mb?"1fr":"1fr 1fr",gap:mb?12:20}},
+                h('div',null,
+                  h('div',{style:Object.assign({},tiny,{marginBottom:6})},"Frequency — events per year"),
+                  h('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}},
+                    numIn(e,"fMin","min"),numIn(e,"fMode","likely"),numIn(e,"fMax","max"))),
+                h('div',null,
+                  h('div',{style:Object.assign({},tiny,{marginBottom:6})},"Loss magnitude — $ per event"),
+                  h('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}},
+                    numIn(e,"mMin","min"),numIn(e,"mMode","likely"),numIn(e,"mMax","max")))),
+
+              h('div',{style:{display:"flex",gap:mb?14:26,marginTop:14,paddingTop:12,
+                  borderTop:"1px solid "+C.borderSoft,flexWrap:"wrap"}},
+                [["Expected / yr",s.mean,C.text],["Median (P50)",s.p50,C.textMuted],["Bad year (P90)",s.p90,C.accent]]
+                  .map(([lbl,val,col])=>h('div',{key:lbl},
+                    h('div',{style:tiny},lbl),
+                    h('div',{style:{fontFamily:display,fontSize:mb?18:21,fontWeight:700,color:col,lineHeight:1.2}},fmtMoney(val))))));
+          }),
+
+      entries.length>0?h('div',{style:{background:C.accentSoft,border:"1px solid "+C.accent+"55",
+          borderLeft:"4px solid "+C.accent,borderRadius:14,padding:pd,marginBottom:18}},
+        h('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,marginBottom:12}},
+          h('div',{style:Object.assign({},eyebrow,{color:C.accent})},"Aggregate annual loss exposure"),
+          h('button',{onClick:()=>setSeed(s=>s+1),
+            style:{fontFamily:ui,fontSize:12,fontWeight:600,cursor:"pointer",padding:"6px 14px",
+              borderRadius:999,border:"1px solid "+C.accent,background:"transparent",color:C.accent}},
+            "Re-run "+ITER.toLocaleString())),
+        h('div',{style:{display:"grid",gridTemplateColumns:mb?"1fr 1fr":"repeat(4,1fr)",gap:12}},
+          [["Expected",sim.portfolio.mean],["Median (P50)",sim.portfolio.p50],
+           ["Bad year (P90)",sim.portfolio.p90],["Severe (P99)",sim.portfolio.p99]]
+            .map(([lbl,val])=>h('div',{key:lbl,style:{background:C.bgCard,border:"1px solid "+C.border,
+                borderRadius:12,padding:"14px 16px"}},
+              h('div',{style:Object.assign({},tiny,{marginBottom:5})},lbl),
+              h('div',{style:{fontFamily:display,fontSize:mb?21:26,fontWeight:700,color:C.accent,lineHeight:1.1}},fmtMoney(val))))),
+        h('div',{style:{fontFamily:ui,fontSize:12.5,lineHeight:1.6,color:C.textMuted,marginTop:12}},
+          sim.portfolio.zero>=0.02
+            ? (sim.portfolio.zero*100).toFixed(1)+"% of simulated years saw no loss event at all. That is why the expected value is a poor description on its own — most years are quiet, and the mean is being carried by the ones that are not."
+            : "The P90 sits "+(sim.portfolio.p50>0?(sim.portfolio.p90/sim.portfolio.p50).toFixed(1)+"×":"well")+" above the median, which is the number worth carrying into a budget conversation. Planning to the expected value funds the average year and leaves the bad one unfunded.")):null,
+
+      h(ProvenancePanel,{data:bmData,error:bmError,isMobile:mb}),
+
+      h('div',{style:Object.assign({},cardStyle(pd),{marginBottom:18})},
+        h('div',{style:Object.assign({},eyebrow,{fontSize:12,color:C.accent,marginBottom:6})},"Framework coverage"),
+        h('div',{style:{fontFamily:ui,fontSize:13.5,lineHeight:1.6,color:C.textDim,marginBottom:16}},
+          "Which parts of each framework this register actually bears on. Coverage means a risk maps here — not that the category is satisfied."),
+
+        h('div',{style:{display:"flex",gap:16,flexWrap:"wrap",marginBottom:16}},
+          [["NIST AI RMF 1.0",coverage.rmf.size,RMF_ALL.length,coverage.rmfPct],
+           ["ISO/IEC 42001 Annex A",coverage.iso.size,ISO.length,coverage.isoPct]]
+            .map(([lbl,n,tot,p])=>h('div',{key:lbl,style:{flex:"1 1 220px"}},
+              h('div',{style:Object.assign({},tiny,{marginBottom:5})},lbl),
+              h('div',{style:{fontFamily:display,fontSize:22,fontWeight:700,color:C.text,marginBottom:6}},
+                n+" of "+tot),
+              h('div',{style:{height:8,background:C.bgBand,borderRadius:999,overflow:"hidden"}},
+                h('div',{style:{width:p+"%",height:"100%",background:C.accent2}}))))),
+
+        Object.keys(RMF).map(fn=>h('div',{key:fn,style:{marginBottom:12}},
+          h('div',{style:Object.assign({},tiny,{marginBottom:7,color:C.accent})},fn),
+          h('div',{style:{display:"flex",flexWrap:"wrap",gap:6}},
+            RMF[fn].map(([code,desc])=>{
+              const on=coverage.rmf.has(code);
+              return h('span',{key:code,title:desc,
+                style:{fontFamily:ui,fontSize:11.5,fontWeight:600,padding:"5px 10px",borderRadius:8,
+                  border:"1px solid "+(on?C.accent:C.border),
+                  background:on?C.accentSoft:"transparent",
+                  color:on?C.accent:C.textDim}},code);
+            })))),
+
+        h('div',{style:{marginTop:6}},
+          h('div',{style:Object.assign({},tiny,{marginBottom:7,color:C.amber})},"ISO/IEC 42001 Annex A"),
+          h('div',{style:{display:"flex",flexWrap:"wrap",gap:6}},
+            ISO.map(([code,desc])=>{
+              const on=coverage.iso.has(code);
+              return h('span',{key:code,title:desc,
+                style:{fontFamily:ui,fontSize:11.5,fontWeight:600,padding:"5px 10px",borderRadius:8,
+                  border:"1px solid "+(on?C.amber:C.border),
+                  background:on?C.amberSoft:"transparent",
+                  color:on?C.amber:C.textDim}},code+" "+desc);
+            })))),
+
+      h('div',{style:Object.assign({},cardStyle(pd),{marginBottom:32})},
+        h('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:10}},
+          h('div',{style:Object.assign({},eyebrow,{fontSize:12,color:C.accent})},"Export"),
+          h('button',{onClick:copy,
+            style:{fontFamily:ui,fontSize:12.5,fontWeight:600,cursor:"pointer",padding:"8px 16px",
+              borderRadius:999,border:"1px solid "+C.accent,
+              background:copied?C.accent:"transparent",color:copied?"#fff":C.accent}},
+            copied?"Copied":"Copy as Markdown")),
+        h('pre',{style:{fontFamily:"ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+            fontSize:mb?10.5:12,lineHeight:1.6,color:C.textMuted,background:C.bg,
+            border:"1px solid "+C.border,borderRadius:12,padding:mb?12:18,
+            overflowX:"auto",whiteSpace:"pre-wrap",wordBreak:"break-word",maxHeight:340}},exportMd)),
+
+      h('div',null,
+        h('div',{style:Object.assign({},eyebrow,{color:C.sage,marginBottom:12})},"The takeaway"),
+        h('p',{style:Object.assign({},prose,{marginBottom:14})},
+          "The seeded ranges here are illustrative, and they are the weakest part of any model like this. Frequency and magnitude for AI-specific loss events are not well established yet — the incident base is thin and mostly unpublished. Replace them with your own calibrated estimates before the output means anything about your organisation."),
+        h('p',{style:Object.assign({},prose,{marginBottom:14})},
+          "What survives that caveat is the shape of the argument. A range with a stated basis can be challenged on its basis. A colour can only be argued about. When an AI programme has to justify its budget against every other control investment, only one of those two travels."),
+        h('p',{style:prose},
+          "Coverage and exposure answer different questions, and you need both. Coverage tells an auditor the programme is complete; exposure tells a board whether it is worth what it costs.")),
+
+      h('div',{style:{marginTop:36,paddingTop:20,borderTop:"1px solid "+C.border,
+          fontFamily:ui,fontSize:12,lineHeight:1.65,color:C.textDim}},
+        "Category and control names are from ",
+        h('a',{href:"https://www.nist.gov/itl/ai-risk-management-framework"},"NIST AI RMF 1.0"),
+        " and ISO/IEC 42001:2023, used for mapping reference only. Mapping is at category and Annex A group level. Nothing you enter leaves your browser — no server, no storage, no telemetry."));
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(h(App));
+  </script>
+</body>
+</html>
